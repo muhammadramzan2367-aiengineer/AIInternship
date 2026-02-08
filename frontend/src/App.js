@@ -6,36 +6,34 @@ function App() {
   const [response, setResponse] = useState("");
 
   const sendPrompt = async () => {
-    if (!prompt) {
+    if (!prompt.trim()) {
       setResponse("Please type something...");
       return;
     }
 
-    setResponse("Thinking...");
+    setResponse("🤔 Thinking...");
 
     try {
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ prompt: prompt }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
       });
 
       const data = await res.json();
-      setResponse(data.response);
+      setResponse(data.response || "No response from server.");
     } catch (error) {
-      setResponse("Backend not responding");
+      setResponse("⚠️ Backend not responding. Check server.");
     }
   };
 
   return (
     <div className="container">
-      <h1>🤖 LLaMA 3.1 Chat</h1>
-      <p className="subtitle">React + FastAPI + Groq</p>
+      <h1>⚛️ Physics ChatBot</h1>
+      <p className="subtitle">Ask me anything about physics!</p>
 
       <textarea
-        placeholder="Type your prompt..."
+        placeholder="Type your question..."
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       ></textarea>
