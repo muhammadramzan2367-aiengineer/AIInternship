@@ -1,6 +1,7 @@
+/* --- Global Styles --- */
 body {
   margin: 0;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   background: linear-gradient(to right, #667eea, #764ba2);
   display: flex;
   justify-content: center;
@@ -8,90 +9,170 @@ body {
   min-height: 100vh;
 }
 
-.container {
-  width: 90%;
-  max-width: 500px;
-  background: #fff;
-  padding: 30px 25px;
-  border-radius: 16px;
-  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+/* --- Home Page Styles --- */
+.home {
   text-align: center;
-  transition: transform 0.2s ease;
+  color: white;
+  padding: 20px;
 }
 
-.container:hover {
-  transform: translateY(-3px);
-}
-
-h1 {
+.home h1 {
+  font-size: 2.5rem;
   margin-bottom: 10px;
-  font-size: 28px;
-  color: #333;
 }
 
 .subtitle {
-  color: #555;
-  font-size: 14px;
+  font-size: 1.1rem;
+  margin-bottom: 30px;
+  opacity: 0.9;
+}
+
+.card-container {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap; /* Allows cards to stack on mobile */
+}
+
+.card {
+  background: white;
+  color: #333;
+  padding: 25px;
+  border-radius: 16px;
+  width: 280px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+.card h3 {
+  margin-top: 0;
+  color: #667eea;
+}
+
+.card p {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #666;
   margin-bottom: 20px;
 }
 
+/* --- Chat Interface Container --- */
+.container {
+  width: 95%;
+  max-width: 420px;
+  height: 85vh;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  background: #667eea;
+  color: white;
+  padding: 15px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.chat-box {
+  flex: 1;
+  padding: 15px;
+  overflow-y: auto;
+  background: #f7f7f7;
+}
+
+/* --- Messages --- */
+.message {
+  display: flex;
+  margin-bottom: 12px;
+  align-items: flex-end;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message.bot {
+  justify-content: flex-start;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  margin: 0 8px;
+  flex-shrink: 0;
+}
+
+.bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.user .bubble {
+  background: #667eea;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.bot .bubble {
+  background: #e2e8f0;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+
+/* --- Input Area --- */
+.input-area {
+  padding: 10px;
+  border-top: 1px solid #ddd;
+  display: flex;
+  gap: 10px;
+  background: white;
+}
+
 textarea {
-  width: 100%;
-  height: 120px;
-  padding: 12px;
-  border-radius: 12px;
+  flex: 1;
+  height: 45px;
+  resize: none;
+  border-radius: 10px;
+  padding: 10px;
   border: 1px solid #ccc;
-  resize: vertical;
-  font-size: 15px;
-  transition: border 0.2s ease;
+  font-family: inherit;
 }
 
 textarea:focus {
-  outline: none;
   border-color: #667eea;
+  outline: none;
 }
 
 button {
-  margin-top: 15px;
-  width: 100%;
-  padding: 12px;
-  background: #667eea;
+  background-color: #667eea;
   border: none;
   color: white;
-  font-size: 17px;
-  font-weight: 600;
-  border-radius: 12px;
+  padding: 10px 18px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.1s ease;
+  font-weight: 600;
+  transition: background-color 0.2s ease;
 }
 
 button:hover {
-  background: #5a67d8;
-  transform: scale(1.02);
-}
-
-button:active {
-  transform: scale(0.98);
-}
-
-.response-box {
-  margin-top: 20px;
-  background: #f4f4f4;
-  padding: 15px;
-  border-radius: 12px;
-  text-align: left;
-  max-height: 250px;
-  overflow-y: auto;
-}
-
-.response-box h3 {
-  margin-top: 0;
-  font-size: 18px;
-  color: #333;
-}
-
-.response-box p {
-  white-space: pre-wrap;
-  font-size: 15px;
-  color: #444;
+  background-color: #5a67d8;
 }
