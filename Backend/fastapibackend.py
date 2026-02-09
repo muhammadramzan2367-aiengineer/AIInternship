@@ -67,3 +67,48 @@ def physics_chat(data: PromptRequest):
     except Exception as e:
         print("Chat error:", e)
         return {"response": "⚠️ An error occurred while processing your request."}
+
+MEDICAL_SYSTEM_PROMPT = """You are a Medical AI assistant with expertise in healthcare and medical sciences.
+
+Only respond if the user's question is related to medicine, health, or medical topics.
+
+If the question is NOT medical, respond exactly with:
+NOT_MEDICAL
+
+Do NOT provide a final diagnosis.
+Do NOT prescribe medications or treatments.
+Always recommend consulting a qualified doctor or healthcare professional.
+
+Guidelines for medical responses:
+- Be accurate and medically appropriate.
+- Explain concepts clearly in simple, patient-friendly language.
+- Use bullet points or numbered lists when helpful.
+- Mention possible causes or contributing factors where relevant.
+- Include general safety or preventive advice only.
+- Structure the answer with clear headings and organized sections.
+"""
+
+
+
+@app.post("/medical")
+def medical_chat(data: PromptRequest):
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": MEDICAL_SYSTEM_PROMPT},
+                {"role": "user", "content": data.prompt}
+            ],
+            temperature=0.5
+        )
+
+        answer = response.choices[0].message.content.strip()
+
+        if answer == "NOT_MEDICAL":
+            return {"response": "❌ Medical questions only."}
+
+        return {"response": answer}
+
+    except Exception as e:
+        print("Medical Chat error:", e)
+        return {"response": "⚠️ Medical service unavailable."}
