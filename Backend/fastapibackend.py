@@ -4,6 +4,16 @@ from pydantic import BaseModel
 from groq import Groq
 import os
 from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File
+import shutil
+import os
+from fastapi import FastAPI, UploadFile, File
+from pydantic import BaseModel
+import shutil
+import os
+from rag import RAGPipeline
+from openai import OpenAI
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -65,8 +75,9 @@ def physics_chat(data: PromptRequest):
         return {"response": answer}
 
     except Exception as e:
-        print("Chat error:", e)
-        return {"response": "⚠️ An error occurred while processing your request."}
+     traceback.print_exc()
+    return {"response": f"⚠️ {str(e)}"}
+
 
 MEDICAL_SYSTEM_PROMPT = """You are a Medical AI assistant with expertise in healthcare and medical sciences.
 
@@ -112,3 +123,72 @@ def medical_chat(data: PromptRequest):
     except Exception as e:
         print("Medical Chat error:", e)
         return {"response": "⚠️ Medical service unavailable."}
+    
+  
+
+rag = RAGPipeline()
+
+# 🔑 Put your key here
+client = OpenAI(api_key="GROQ_API_KEY")
+
+UPLOAD_FOLDER = "documents"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+
+class QuestionRequest(BaseModel):
+    question: str
+
+
+# ==========================
+# UPLOAD PDF ENDPOINT
+# ==========================
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {"message": "File uploaded successfully"}
+
+
+
+@app.get("/build")
+def build_index():
+    rag.load_documents()
+    rag.build_index()
+    return {"message": "Vector database created successfully"}
+
+
+# ==========================
+# ASK QUESTION (RAG)
+# ==========================
+
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
+
+    retrieved_chunks = rag.retrieve(request.question)
+
+    context = "\n\n".join(retrieved_chunks)
+
+    prompt = f"""
+    Answer the question using the context below.
+
+    Context:
+    {context}
+
+    Question:
+    {request.question}
+    """
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",  # change if needed
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return {
+        "answer": response.choices[0].message.content,
+        "context_used": retrieved_chunks
+    }

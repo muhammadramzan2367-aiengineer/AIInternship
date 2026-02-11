@@ -12,26 +12,27 @@ export default function Home() {
       </p>
 
       <div className="card-container">
+        {/* Existing Medical Card */}
         <div className="card">
           <h3>🩺 Medical Tutor</h3>
-          <p>
-            Ask about diseases, symptoms, first aid and basic healthcare.
-          </p>
-          <button onClick={() => navigate("/medical")}>
-            Start Medical Chat
-          </button>
+          <p>Ask about diseases, symptoms, first aid and basic healthcare.</p>
+          <button onClick={() => navigate("/medical")}>Start Medical Chat</button>
         </div>
 
+        {/* Existing Physics Card */}
         <div className="card">
           <h3>⚛️ Physics Tutor</h3>
-          <p>
-            Learn physics concepts with formulas, steps and examples.
-          </p>
-          <button onClick={() => navigate("/physics")}>
-            Start Physics Chat
-          </button>
+          <p>Learn physics concepts with formulas, steps and examples.</p>
+          <button onClick={() => navigate("/physics")}>Start Physics Chat</button>
+        </div>
+
+        {/* NEW Document Card */}
+        <div className="card">
+          <h3>📄 Document Chat</h3>
+          <p>Upload your PDFs and ask questions to get instant summaries and answers.</p>
+          <button onClick={() => navigate("/document")}>Start Document Chat</button>
         </div>
       </div>
     </div>
-  );
-}
+  ); // Added closing semicolon here
+} // Added missing closing brace here
