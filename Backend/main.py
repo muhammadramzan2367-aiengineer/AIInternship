@@ -17,9 +17,8 @@ import traceback
 
 # Load environment variables
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in environment variables")
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
 
 app = FastAPI()
 
@@ -32,8 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Groq client
-client = Groq(api_key=GROQ_API_KEY)
 
 # Request model
 class PromptRequest(BaseModel):
@@ -128,9 +125,6 @@ def medical_chat(data: PromptRequest):
 
 rag = RAGPipeline()
 
-# 🔑 Put your key here
-client = OpenAI(api_key="GROQ_API_KEY")
-
 UPLOAD_FOLDER = "documents"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -192,3 +186,13 @@ def ask_question(request: QuestionRequest):
         "answer": response.choices[0].message.content,
         "context_used": retrieved_chunks
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
