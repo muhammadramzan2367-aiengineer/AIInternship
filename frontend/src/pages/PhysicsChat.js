@@ -4,7 +4,7 @@ export default function PhysicsChat() {
   return (
     <ChatUI
       title="⚛️ Physics ChatBot"
-      endpoint="http://127.0.0.1:8000/chat"
+      endpoint="http://127.0.0.1:8000/chat/physics"
       placeholder="Ask a physics question..."
     />
   );
