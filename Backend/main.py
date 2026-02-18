@@ -148,83 +148,126 @@ def build_rag_index():
         traceback.print_exc()
         raise HTTPException(500, detail=f"Build failed: {str(e)}")
 
-
 @app.post("/ask", response_model=RAGResponse)
-def ask_rag_question(req: QuestionRequest):
+async def ask_rag_question(req: QuestionRequest):
     """
-    Ask a question using RAG.
-    Expects JSON: { "question": "your question here" }
+    Ask a question using RAG (retrieval-augmented generation).
+    
+    Required JSON body format:
+    {
+      "question": "Your question here"
+    }
     """
-    # ─── Debug: log what was actually received ───────────────────────────────
-    print(f"[ASK] Received request body: {req.dict()}")
+    # ────────────────────────────────────────────────────────────────
+    # Debug logging – helps identify frontend payload problems
+    print(f"[ASK] Received request → question length: {len(req.question or '')}")
+    print(f"[ASK] Full validated model: {req.dict()}")
+    # ────────────────────────────────────────────────────────────────
 
-    if not req.question or not req.question.strip():
+    # Early rejection for obviously invalid input
+    if not req.question or not isinstance(req.question, str):
         raise HTTPException(
             status_code=422,
-            detail="The 'question' field is required and cannot be empty."
+            detail="Field 'question' is required and must be a non-empty string"
+        )
+
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(
+            status_code=422,
+            detail="Question cannot be empty after trimming whitespace"
+        )
+
+    if len(question) > 2000:  # reasonable upper limit
+        raise HTTPException(
+            status_code=422,
+            detail="Question is too long (max 2000 characters)"
         )
 
     try:
-        # Check if vector store is ready
+        # Check if vector database is ready
         if not rag.is_ready():
             raise HTTPException(
-                status_code=400,
-                detail="Vector index not built yet. Please upload PDFs and call /build first."
+                status_code=503,  # Service Unavailable
+                detail="Vector index is not yet built. Please upload PDFs and call /build endpoint first."
             )
 
         # Retrieve relevant chunks
-        chunks = rag.retrieve(req.question.strip(), k=4)
+        chunks = rag.retrieve(question, k=4)
 
-        if not chunks:
+        if not chunks or all(not c.strip() for c in chunks):
             return RAGResponse(
-                answer="I couldn't find any relevant information in the uploaded documents.",
+                answer="Sorry, I couldn't find any relevant information in the uploaded documents.",
                 context_used=[]
             )
 
-        # Format context
-        context = "\n\n".join([f"[Chunk {i+1}] {chunk}" for i, chunk in enumerate(chunks)])
+        # Format context nicely
+        context_lines = []
+        for i, chunk in enumerate(chunks, 1):
+            cleaned = chunk.strip()
+            if cleaned:
+                context_lines.append(f"[Excerpt {i}]\n{cleaned}")
+        context = "\n\n".join(context_lines)
 
-        # Improved prompt with clear instructions
-        prompt = f"""You are a helpful and accurate assistant.
-Answer the user's question using **only** the provided context.
-If the context does not contain enough information to answer the question, 
-clearly say so and do not make up information.
+        # Structured, strict prompt
+        prompt = f"""You are a precise and helpful assistant.
+Answer the question using **only** the provided context excerpts.
+Do NOT use any external knowledge.
+If the context does not contain sufficient information to answer accurately, 
+clearly state that you don't have enough information.
 
-Context:
+Context excerpts:
 {context}
 
-Question: {req.question}
+Question: {question}
 
-Answer in a clear, concise and natural way:"""
+Answer concisely, naturally and directly:"""
 
-        # Call Groq LLM
-        response = client.chat.completions.create(
+        # Call Groq model
+        llm_response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.35,
             max_tokens=650,
-            top_p=0.9,
+            top_p=0.92,
+            presence_penalty=0.1,
+            frequency_penalty=0.0,
         )
 
-        answer_text = response.choices[0].message.content.strip()
+        answer_text = llm_response.choices[0].message.content.strip()
 
         return RAGResponse(
             answer=answer_text,
             context_used=chunks
         )
 
-    except RuntimeError as re:
-        # Usually means index not found / not initialized
-        raise HTTPException(status_code=400, detail=str(re))
+    except RuntimeError as runtime_err:
+        # Usually related to vector store / retrieval failures
+        raise HTTPException(
+            status_code=400,
+            detail=f"Retrieval system error: {str(runtime_err)}"
+        )
 
-    except Exception as e:
-        # Log full traceback for debugging
+    except Exception as general_err:
         traceback.print_exc()
-        error_msg = str(e)
-        if "422" in error_msg or "validation" in error_msg.lower():
-            raise HTTPException(status_code=422, detail="Invalid request format - expected { \"question\": \"...\" }")
-        raise HTTPException(status_code=500, detail=f"Server error during question processing: {error_msg}")
+        error_str = str(general_err).lower()
 
+        if "422" in error_str or "validation" in error_str or "unprocessable" in error_str:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid request format. Expected JSON: {\"question\": \"your question\"}"
+            )
+
+        if any(word in error_str for word in ["rate limit", "quota", "429"]):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit reached. Please try again in a few moments."
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error while processing your question: {str(general_err)}"
+        )
 
 @app.get("/health")
 def health_check():

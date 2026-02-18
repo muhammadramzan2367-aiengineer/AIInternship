@@ -5,16 +5,20 @@ import "../App.css";
 export default function DocumentChat() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [buildStatus, setBuildStatus] = useState("");
+  const [chatStatus, setChatStatus] = useState(""); // new: feedback during ask
   const [isUploading, setIsUploading] = useState(false);
   const [isBuilding, setIsBuilding] = useState(false);
+  const [isAsking, setIsAsking] = useState(false); // new
   const [indexReady, setIndexReady] = useState(false);
   const [lastUploadedFileName, setLastUploadedFileName] = useState(null);
 
   const resetState = () => {
     setUploadStatus("");
     setBuildStatus("");
+    setChatStatus("");
     setIsUploading(false);
     setIsBuilding(false);
+    setIsAsking(false);
     setIndexReady(false);
     setLastUploadedFileName(null);
   };
@@ -34,6 +38,7 @@ export default function DocumentChat() {
     setIsUploading(true);
     setUploadStatus(`Uploading ${file.name}...`);
     setBuildStatus("");
+    setChatStatus("");
     setIndexReady(false);
 
     try {
@@ -66,6 +71,7 @@ export default function DocumentChat() {
 
     setIsBuilding(true);
     setBuildStatus("Indexing document... (may take a few seconds)");
+    setChatStatus("");
 
     try {
       const res = await fetch("http://127.0.0.1:8000/build", {
@@ -86,6 +92,46 @@ export default function DocumentChat() {
       setBuildStatus("❌ Cannot connect to backend.");
     } finally {
       setIsBuilding(false);
+    }
+  };
+
+  // New: example send function – replace or integrate with your ChatUI logic
+  const handleAskQuestion = async (userMessage) => {
+    if (!userMessage.trim()) return;
+
+    setIsAsking(true);
+    setChatStatus("Getting answer...");
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/ask", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: userMessage.trim(), // ← critical: must be "question"
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to get answer");
+      }
+
+      const data = await res.json();
+      // Here you would normally add data.answer to the chat UI
+      console.log("Answer received:", data.answer);
+      setChatStatus(""); // clear status on success
+
+      // Return data for ChatUI to handle display
+      return data;
+
+    } catch (err) {
+      console.error("Ask error:", err);
+      setChatStatus(`❌ ${err.message}`);
+      throw err;
+    } finally {
+      setIsAsking(false);
     }
   };
 
@@ -149,12 +195,14 @@ export default function DocumentChat() {
           </label>
 
           {uploadStatus && (
-            <p style={{
-              marginTop: "12px",
-              fontSize: "14px",
-              color: uploadStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
-              lineHeight: 1.4,
-            }}>
+            <p
+              style={{
+                marginTop: "12px",
+                fontSize: "14px",
+                color: uploadStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
+                lineHeight: 1.4,
+              }}
+            >
               {uploadStatus}
             </p>
           )}
@@ -184,12 +232,14 @@ export default function DocumentChat() {
           </button>
 
           {buildStatus && (
-            <p style={{
-              marginTop: "12px",
-              fontSize: "14px",
-              color: buildStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
-              lineHeight: 1.4,
-            }}>
+            <p
+              style={{
+                marginTop: "12px",
+                fontSize: "14px",
+                color: buildStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
+                lineHeight: 1.4,
+              }}
+            >
               {buildStatus}
             </p>
           )}
@@ -197,20 +247,22 @@ export default function DocumentChat() {
 
         {/* Ready Indicator */}
         {indexReady && (
-          <div style={{
-            marginTop: "20px",
-            padding: "12px",
-            background: "rgba(167,243,208,0.18)",
-            borderRadius: "10px",
-            textAlign: "center",
-            fontWeight: "bold",
-            color: "#d1fae5",
-          }}>
+          <div
+            style={{
+              marginTop: "20px",
+              padding: "12px",
+              background: "rgba(167,243,208,0.18)",
+              borderRadius: "10px",
+              textAlign: "center",
+              fontWeight: "bold",
+              color: "#d1fae5",
+            }}
+          >
             ✓ Document indexed — ready to chat!
           </div>
         )}
 
-        {/* Reset button (dev helper) */}
+        {/* Reset button */}
         <div style={{ textAlign: "center", marginTop: "16px" }}>
           <button
             onClick={resetState}
@@ -229,16 +281,18 @@ export default function DocumentChat() {
         </div>
       </div>
 
-      {/* Chat Component */}
-      <div style={{
-        width: "100%",
-        maxWidth: "760px",
-        flex: 1,
-        background: "rgba(0,0,0,0.15)",
-        borderRadius: "16px",
-        overflow: "hidden",
-        boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-      }}>
+      {/* Chat Area */}
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "760px",
+          flex: 1,
+          background: "rgba(0,0,0,0.15)",
+          borderRadius: "16px",
+          overflow: "hidden",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+        }}
+      >
         <ChatUI
           title="Document Assistant"
           endpoint="http://127.0.0.1:8000/ask"
@@ -247,7 +301,9 @@ export default function DocumentChat() {
               ? "Ask anything about your document..."
               : "Upload a PDF and build index first →"
           }
-          disabled={!indexReady}
+          disabled={!indexReady || isAsking}
+          onSend={handleAskQuestion} // ← pass the corrected send function
+          statusMessage={chatStatus} // ← optional: pass status for display
         />
       </div>
     </div>
