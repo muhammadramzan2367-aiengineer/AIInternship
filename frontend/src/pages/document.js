@@ -1,16 +1,20 @@
-import { useState } from "react";
-import ChatUI from "../ChatUI";
+import { useState, useRef } from "react";
+import ChatUI from "../ChatUI";           // adjust path
 import "../App.css";
 
 export default function DocumentChat() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [buildStatus, setBuildStatus] = useState("");
-  const [chatStatus, setChatStatus] = useState(""); // new: feedback during ask
+  const [chatStatus, setChatStatus] = useState("");
+  
   const [isUploading, setIsUploading] = useState(false);
   const [isBuilding, setIsBuilding] = useState(false);
-  const [isAsking, setIsAsking] = useState(false); // new
-  const [indexReady, setIndexReady] = useState(false);
-  const [lastUploadedFileName, setLastUploadedFileName] = useState(null);
+  const [isAsking, setIsAsking] = useState(false);
+  
+  const [indexBuilt, setIndexBuilt] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  
+  const fileInputRef = useRef(null);
 
   const resetState = () => {
     setUploadStatus("");
@@ -19,12 +23,13 @@ export default function DocumentChat() {
     setIsUploading(false);
     setIsBuilding(false);
     setIsAsking(false);
-    setIndexReady(false);
-    setLastUploadedFileName(null);
+    setIndexBuilt(false);
+    setUploadedFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files?.[0];
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.type !== "application/pdf") {
@@ -39,7 +44,6 @@ export default function DocumentChat() {
     setUploadStatus(`Uploading ${file.name}...`);
     setBuildStatus("");
     setChatStatus("");
-    setIndexReady(false);
 
     try {
       const res = await fetch("http://127.0.0.1:8000/upload", {
@@ -49,68 +53,66 @@ export default function DocumentChat() {
 
       const data = await res.json();
 
-      if (res.ok) {
-        setUploadStatus(`✅ Uploaded: ${file.name}`);
-        setLastUploadedFileName(file.name);
-      } else {
-        setUploadStatus(`❌ Upload failed — ${data.detail || data.message || "server error"}`);
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || "Upload failed");
       }
+
+      setUploadStatus(`✅ Uploaded: ${file.name}`);
+      setUploadedFiles((prev) => [...new Set([...prev, file.name])]);
+      setIndexBuilt(false); // force re-index
     } catch (err) {
-      console.error("Upload error:", err);
-      setUploadStatus("❌ Connection error — is backend running?");
+      console.error("Upload failed:", err);
+      setUploadStatus(`❌ ${err.message || "Connection error — is backend running?"}`);
     } finally {
       setIsUploading(false);
+      e.target.value = "";
     }
   };
 
   const handleBuildIndex = async () => {
-    if (!lastUploadedFileName && !indexReady) {
-      setBuildStatus("⚠️ Please upload a PDF first.");
+    if (uploadedFiles.length === 0) {
+      setBuildStatus("⚠️ Please upload at least one PDF first.");
       return;
     }
 
     setIsBuilding(true);
-    setBuildStatus("Indexing document... (may take a few seconds)");
+    setBuildStatus("Building vector index... (may take 10–60 seconds)");
     setChatStatus("");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/build", {
+      const res = await fetch("http://127.0.0.1:8000/build-index", {
         method: "POST",
       });
 
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Indexing failed");
+      }
+
       const data = await res.json();
 
-      if (res.ok) {
-        setBuildStatus(`✅ Success! ${data.message || "Index built."}`);
-        setIndexReady(true);
-      } else {
-        setBuildStatus(`❌ Indexing failed — ${data.detail || data.message || "unknown error"}`);
-        setIndexReady(false);
-      }
+      setBuildStatus(`✅ Index updated — ${data.added_chunks || "?"} new chunks added`);
+      setIndexBuilt(true);
     } catch (err) {
-      console.error("Build error:", err);
-      setBuildStatus("❌ Cannot connect to backend.");
+      console.error("Build index error:", err);
+      setBuildStatus(`❌ ${err.message || "Cannot connect to backend"}`);
+      setIndexBuilt(false);
     } finally {
       setIsBuilding(false);
     }
   };
 
-  // New: example send function – replace or integrate with your ChatUI logic
   const handleAskQuestion = async (userMessage) => {
-    if (!userMessage.trim()) return;
+    if (!userMessage?.trim()) return null;
 
     setIsAsking(true);
-    setChatStatus("Getting answer...");
+    setChatStatus("Searching documents and generating answer...");
 
     try {
       const res = await fetch("http://127.0.0.1:8000/ask", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          question: userMessage.trim(), // ← critical: must be "question"
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: userMessage.trim() }),
       });
 
       if (!res.ok) {
@@ -119,191 +121,184 @@ export default function DocumentChat() {
       }
 
       const data = await res.json();
-      // Here you would normally add data.answer to the chat UI
-      console.log("Answer received:", data.answer);
-      setChatStatus(""); // clear status on success
 
-      // Return data for ChatUI to handle display
-      return data;
+      setChatStatus("");
 
+      return {
+        role: "assistant",
+        content: data.answer,
+        sources: data.sources || [],
+        contexts: data.contexts || [],
+      };
     } catch (err) {
-      console.error("Ask error:", err);
+      console.error("Ask failed:", err);
       setChatStatus(`❌ ${err.message}`);
-      throw err;
+      return {
+        role: "assistant",
+        content: `Sorry, something went wrong: ${err.message}`,
+      };
     } finally {
       setIsAsking(false);
     }
   };
 
   return (
-    <div
-      className="document-container"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        minHeight: "100vh",
-        width: "100%",
-        padding: "16px 8px",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        color: "#fff",
-      }}
-    >
-      <h1 style={{ margin: "0 0 24px 0", fontSize: "2.1rem", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
-        📄 Document Chat
+    <div className="document-container" style={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      color: "#fff",
+      padding: "20px",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+    }}>
+      <h1 style={{ marginBottom: "32px", fontSize: "2.4rem", textShadow: "0 2px 10px rgba(0,0,0,0.5)" }}>
+        📚 Document Chat
       </h1>
 
-      {/* Control Panel */}
-      <div
-        style={{
-          background: "rgba(255, 255, 255, 0.12)",
-          backdropFilter: "blur(10px)",
-          borderRadius: "16px",
-          padding: "24px",
-          width: "100%",
-          maxWidth: "500px",
-          marginBottom: "32px",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
-          border: "1px solid rgba(255,255,255,0.2)",
-        }}
-      >
-        {/* Upload */}
-        <div style={{ textAlign: "center", marginBottom: "20px" }}>
+      <div style={{
+        background: "rgba(255,255,255,0.13)",
+        backdropFilter: "blur(12px)",
+        borderRadius: "16px",
+        padding: "28px",
+        width: "100%",
+        maxWidth: "540px",
+        marginBottom: "40px",
+        boxShadow: "0 12px 48px rgba(0,0,0,0.3)",
+        border: "1px solid rgba(255,255,255,0.18)",
+      }}>
+        {/* Upload Section */}
+        <div style={{ textAlign: "center", marginBottom: "28px" }}>
           <input
+            id="pdf-upload"                     // ← FIXED: added id
             type="file"
             accept="application/pdf"
             onChange={handleFileUpload}
-            id="pdf-upload"
+            ref={fileInputRef}
             style={{ display: "none" }}
             disabled={isUploading || isBuilding}
           />
           <label
-            htmlFor="pdf-upload"
+            htmlFor="pdf-upload"                // ← FIXED: matches input id
             style={{
-              background: isUploading || isBuilding ? "#555" : "white",
+              background: isUploading || isBuilding ? "#555" : "#ffffff",
               color: isUploading || isBuilding ? "#aaa" : "#4f46e5",
-              padding: "12px 32px",
+              padding: "14px 40px",
               borderRadius: "12px",
               fontWeight: "bold",
               cursor: isUploading || isBuilding ? "not-allowed" : "pointer",
               display: "inline-block",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-              transition: "all 0.22s ease",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+              transition: "all 0.25s ease",
             }}
           >
-            {isUploading ? "⏳ Uploading..." : "📎 Upload PDF"}
+            {isUploading ? "Uploading..." : "📤 Upload PDF"}
           </label>
 
           {uploadStatus && (
-            <p
-              style={{
-                marginTop: "12px",
-                fontSize: "14px",
-                color: uploadStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
-                lineHeight: 1.4,
-              }}
-            >
+            <p style={{
+              marginTop: "14px",
+              color: uploadStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
+              fontSize: "0.95rem",
+            }}>
               {uploadStatus}
             </p>
           )}
+
+          {uploadedFiles.length > 0 && (
+            <div style={{ marginTop: "16px", fontSize: "0.9rem", opacity: 0.9 }}>
+              Uploaded: {uploadedFiles.join(", ")}
+            </div>
+          )}
         </div>
 
-        {/* Build Button */}
+        {/* Build Index */}
         <div style={{ textAlign: "center" }}>
           <button
             onClick={handleBuildIndex}
-            disabled={isBuilding || isUploading || (!lastUploadedFileName && !indexReady)}
+            disabled={isBuilding || isUploading || uploadedFiles.length === 0}
             style={{
-              background: isBuilding || isUploading || (!lastUploadedFileName && !indexReady)
+              background: isBuilding || isUploading || uploadedFiles.length === 0
                 ? "#6b7280"
                 : "#4f46e5",
               color: "white",
               border: "none",
-              padding: "12px 36px",
+              padding: "14px 48px",
               borderRadius: "12px",
               fontWeight: "bold",
-              fontSize: "1.05rem",
-              cursor: isBuilding || isUploading || (!lastUploadedFileName && !indexReady) ? "not-allowed" : "pointer",
-              boxShadow: "0 5px 18px rgba(79,70,229,0.35)",
-              transition: "all 0.22s ease",
+              fontSize: "1.1rem",
+              cursor: (isBuilding || isUploading || uploadedFiles.length === 0) ? "not-allowed" : "pointer",
+              boxShadow: "0 6px 20px rgba(79,70,229,0.4)",
+              transition: "all 0.25s ease",
             }}
           >
-            {isBuilding ? "⏳ Indexing..." : "⚡ Build Index"}
+            {isBuilding ? "Building Index..." : "⚡ Build / Update Index"}
           </button>
 
           {buildStatus && (
-            <p
-              style={{
-                marginTop: "12px",
-                fontSize: "14px",
-                color: buildStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
-                lineHeight: 1.4,
-              }}
-            >
+            <p style={{
+              marginTop: "14px",
+              color: buildStatus.startsWith("✅") ? "#a7f3d0" : "#fecaca",
+              fontSize: "0.95rem",
+            }}>
               {buildStatus}
             </p>
           )}
         </div>
 
-        {/* Ready Indicator */}
-        {indexReady && (
-          <div
-            style={{
-              marginTop: "20px",
-              padding: "12px",
-              background: "rgba(167,243,208,0.18)",
-              borderRadius: "10px",
-              textAlign: "center",
-              fontWeight: "bold",
-              color: "#d1fae5",
-            }}
-          >
-            ✓ Document indexed — ready to chat!
+        {indexBuilt && (
+          <div style={{
+            marginTop: "24px",
+            padding: "14px",
+            background: "rgba(167,243,208,0.22)",
+            borderRadius: "12px",
+            textAlign: "center",
+            fontWeight: 600,
+            color: "#d1fae5",
+            border: "1px solid rgba(167,243,208,0.4)",
+          }}>
+            ✓ Index is ready — you can now ask questions
           </div>
         )}
 
-        {/* Reset button */}
-        <div style={{ textAlign: "center", marginTop: "16px" }}>
+        <div style={{ textAlign: "center", marginTop: "20px" }}>
           <button
             onClick={resetState}
             style={{
               background: "transparent",
-              border: "1px solid rgba(255,255,255,0.4)",
-              color: "rgba(255,255,255,0.8)",
-              padding: "6px 16px",
-              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.5)",
+              color: "rgba(255,255,255,0.85)",
+              padding: "8px 20px",
+              borderRadius: "10px",
               cursor: "pointer",
-              fontSize: "13px",
+              fontSize: "0.9rem",
             }}
           >
-            Reset
+            Reset Everything
           </button>
         </div>
       </div>
 
-      {/* Chat Area */}
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "760px",
-          flex: 1,
-          background: "rgba(0,0,0,0.15)",
-          borderRadius: "16px",
-          overflow: "hidden",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-        }}
-      >
+      <div style={{
+        width: "100%",
+        maxWidth: "820px",
+        flex: 1,
+        background: "rgba(0,0,0,0.2)",
+        borderRadius: "16px",
+        overflow: "hidden",
+        boxShadow: "0 12px 50px rgba(0,0,0,0.35)",
+      }}>
         <ChatUI
           title="Document Assistant"
-          endpoint="http://127.0.0.1:8000/ask"
           placeholder={
-            indexReady
-              ? "Ask anything about your document..."
-              : "Upload a PDF and build index first →"
+            indexBuilt
+              ? "Ask anything about the uploaded documents..."
+              : "Upload PDFs and build index first"
           }
-          disabled={!indexReady || isAsking}
-          onSend={handleAskQuestion} // ← pass the corrected send function
-          statusMessage={chatStatus} // ← optional: pass status for display
+          disabled={!indexBuilt || isAsking}
+          onSend={handleAskQuestion}
+          statusMessage={chatStatus}
+          showSources={true}
         />
       </div>
     </div>

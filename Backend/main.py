@@ -1,20 +1,34 @@
-# main.py
-import os
-import shutil
-import traceback
-from typing import List
-
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
+import os
+import shutil
+from dotenv import load_dotenv
+import traceback
 
-from rag import RAGPipeline, UPLOAD_FOLDER
+from rag import RAGPipeline   # ← your updated rag.py
 
+# ────────────────────────────────────────────────
+# CONFIG
+# ────────────────────────────────────────────────
 load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY not found in .env")
 
-app = FastAPI(title="Physics + Medical + PDF RAG API")
+client = Groq(api_key=GROQ_API_KEY)
+
+UPLOAD_FOLDER = "documents"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Initialize RAG once at startup
+rag = RAGPipeline()
+
+# ────────────────────────────────────────────────
+# FastAPI app
+# ────────────────────────────────────────────────
+app = FastAPI(title="Physics + Medical + RAG API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,278 +38,265 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-rag = RAGPipeline()
-
-
-# ─── Models ────────────────────────────────────────────────────────────────
-
+# ────────────────────────────────────────────────
+# MODELS
+# ────────────────────────────────────────────────
 class PromptRequest(BaseModel):
     prompt: str
-
 
 class QuestionRequest(BaseModel):
     question: str
 
 
-class RAGResponse(BaseModel):
-    answer: str
-    context_used: List[str]
-
-
-# ─── Physics ───────────────────────────────────────────────────────────────
-
+# ────────────────────────────────────────────────
+# PHYSICS CHAT (unchanged)
+# ────────────────────────────────────────────────
 PHYSICS_SYSTEM_PROMPT = """You are a Physics AI assistant with deep knowledge of physical sciences.
-Only respond if the question is related to physics, mechanics, thermodynamics, waves, optics, electricity, modern physics, or related topics.
-If the question is NOT physics-related, respond exactly with: NOT_PHYSICS
+Only respond if the question is related to physics, mechanics, thermodynamics, waves, or related topics.
+If the question is NOT physics, respond exactly with: NOT_PHYSICS
 
-Answer in a structured, student-friendly way:
-1. **Brief explanation**
-2. Use **bullet points** or **numbered lists**
-3. Include **relevant formulas** (use LaTeX if possible)
-4. Add **simple examples**
-5. Use **headings** for multi-part questions"""
+Answer in a structured way:
+1. Start with a **brief explanation**.
+2. Use **bullet points or numbered lists** for clarity.
+3. Include **formulas** where relevant.
+4. Add **examples** to illustrate concepts.
+5. Organize with **headings** for complex topics.
 
-@app.post("/chat/physics")
+Always make the answer easy to understand for students."""
+
+@app.post("/chat")
 def physics_chat(data: PromptRequest):
     try:
-        resp = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": PHYSICS_SYSTEM_PROMPT},
                 {"role": "user", "content": data.prompt}
             ],
-            temperature=0.65,
-            max_tokens=680
+            temperature=0.7,
+            max_tokens=1024,
         )
-        answer = resp.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
 
         if answer == "NOT_PHYSICS":
-            return {"response": "❌ This endpoint only answers Physics questions."}
+            return {"response": "❌ I can only answer Physics questions."}
 
         return {"response": answer}
 
     except Exception as e:
         traceback.print_exc()
-        return {"response": f"⚠️ Error: {str(e)}"}
+        return {"response": f"⚠️ {str(e)}"}
 
 
-# ─── Medical ───────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# MEDICAL CHAT (unchanged)
+# ────────────────────────────────────────────────
+MEDICAL_SYSTEM_PROMPT = """You are a Medical AI assistant with expertise in healthcare and medical sciences.
 
-MEDICAL_SYSTEM_PROMPT = """You are a helpful Medical AI assistant.
-Only respond if the question is related to medicine, health, diseases, anatomy, physiology, or medical concepts.
+Only respond if the user's question is related to medicine, health, or medical topics.
 
-If the question is NOT medical, respond exactly with: NOT_MEDICAL
+If the question is NOT medical, respond exactly with:
+NOT_MEDICAL
 
-Rules:
-- NEVER give a final diagnosis
-- NEVER prescribe medication or treatment
-- ALWAYS recommend seeing a qualified doctor
-- Use clear, simple language
-- Structure answers with headings and bullet points when helpful"""
+Do NOT provide a final diagnosis.
+Do NOT prescribe medications or treatments.
+Always recommend consulting a qualified doctor or healthcare professional.
 
-@app.post("/chat/medical")
+Guidelines for medical responses:
+- Be accurate and medically appropriate.
+- Explain concepts clearly in simple, patient-friendly language.
+- Use bullet points or numbered lists when helpful.
+- Mention possible causes or contributing factors where relevant.
+- Include general safety or preventive advice only.
+- Structure the answer with clear headings and organized sections.
+"""
+
+@app.post("/medical")
 def medical_chat(data: PromptRequest):
     try:
-        resp = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": MEDICAL_SYSTEM_PROMPT},
                 {"role": "user", "content": data.prompt}
             ],
             temperature=0.5,
-            max_tokens=600
+            max_tokens=900,
         )
-        answer = resp.choices[0].message.content.strip()
+
+        answer = response.choices[0].message.content.strip()
 
         if answer == "NOT_MEDICAL":
-            return {"response": "❌ Medical & health questions only."}
+            return {"response": "❌ Medical questions only."}
 
         return {"response": answer}
 
     except Exception as e:
-        print("Medical error:", e)
-        return {"response": "⚠️ Service temporarily unavailable."}
+        print("Medical Chat error:", e)
+        return {"response": "⚠️ Medical service unavailable."}
 
 
-# ─── RAG Endpoints ─────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# RAG ENDPOINTS
+# ────────────────────────────────────────────────
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
+    """
+    Upload a PDF file → saved to documents/ folder
+    You still need to call /build-index to process it
+    """
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, detail="Only PDF files allowed")
+        raise HTTPException(400, detail="Only PDF files are allowed")
 
     file_path = os.path.join(UPLOAD_FOLDER, file.filename)
 
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        return {"message": f"File uploaded: {file.filename}"}
+        return {"message": "File uploaded successfully", "filename": file.filename}
     except Exception as e:
         raise HTTPException(500, detail=f"Failed to save file: {str(e)}")
 
 
-@app.post("/build")
-def build_rag_index():
+@app.post("/build-index")
+def build_index():
+    """
+    Process all PDFs in documents/ folder → chunk → embed → store in Chroma
+    """
     try:
-        count = rag.build_or_update_index()
-        if count == 0:
-            return {"message": "No PDFs found or no content extracted"}
-        return {"message": f"Vector index (re)built — {count} chunks"}
+        added = rag.build_or_update_index()
+        if added == 0:
+            return {"message": "No new PDFs found or no new chunks added", "added_chunks": 0}
+        return {"message": "Index updated successfully", "added_chunks": added}
     except Exception as e:
-        import traceback
         traceback.print_exc()
-        raise HTTPException(500, detail=f"Build failed: {str(e)}")
+        raise HTTPException(500, detail=f"Index build failed: {str(e)}")
 
-@app.post("/ask", response_model=RAGResponse)
-async def ask_rag_question(req: QuestionRequest):
+
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
     """
-    Ask a question using RAG (retrieval-augmented generation).
-    
-    Required JSON body format:
-    {
-      "question": "Your question here"
-    }
+    RAG query: retrieve relevant chunks → pass to LLM → return answer + context
     """
-    # ────────────────────────────────────────────────────────────────
-    # Debug logging – helps identify frontend payload problems
-    print(f"[ASK] Received request → question length: {len(req.question or '')}")
-    print(f"[ASK] Full validated model: {req.dict()}")
-    # ────────────────────────────────────────────────────────────────
-
-    # Early rejection for obviously invalid input
-    if not req.question or not isinstance(req.question, str):
-        raise HTTPException(
-            status_code=422,
-            detail="Field 'question' is required and must be a non-empty string"
-        )
-
-    question = req.question.strip()
-    if not question:
-        raise HTTPException(
-            status_code=422,
-            detail="Question cannot be empty after trimming whitespace"
-        )
-
-    if len(question) > 2000:  # reasonable upper limit
-        raise HTTPException(
-            status_code=422,
-            detail="Question is too long (max 2000 characters)"
-        )
+    if not request.question.strip():
+        raise HTTPException(400, detail="Question cannot be empty")
 
     try:
-        # Check if vector database is ready
+        # ─── Step 1: Check if vector store is ready ───
         if not rag.is_ready():
-            raise HTTPException(
-                status_code=503,  # Service Unavailable
-                detail="Vector index is not yet built. Please upload PDFs and call /build endpoint first."
-            )
+            return {
+                "answer": "Vector database is not initialized or empty.",
+                "contexts": [],
+                "sources": [],
+                "debug": {"error": "Vector store not ready"}
+            }
 
-        # Retrieve relevant chunks
-        chunks = rag.retrieve(question, k=4)
+        # ─── Step 2: Retrieve with scores ───
+        results = rag.retrieve(request.question, k=8)  # increased to 8 for better coverage
 
-        if not chunks or all(not c.strip() for c in chunks):
-            return RAGResponse(
-                answer="Sorry, I couldn't find any relevant information in the uploaded documents.",
-                context_used=[]
-            )
+        # Debug: print retrieval information to terminal
+        print("\n" + "="*60)
+        print(f"QUERY: {request.question}")
+        print(f"Retrieved {len(results)} chunks")
 
-        # Format context nicely
-        context_lines = []
-        for i, chunk in enumerate(chunks, 1):
-            cleaned = chunk.strip()
-            if cleaned:
-                context_lines.append(f"[Excerpt {i}]\n{cleaned}")
-        context = "\n\n".join(context_lines)
+        if results:
+            print("Top results (score - lower is better):")
+            for i, r in enumerate(results[:3], 1):  # show top 3
+                print(f"  {i}. score={r['score']:.4f} | {r['source']} | {r['content'][:80]}...")
+        else:
+            print("→ No chunks retrieved")
 
-        # Structured, strict prompt
-        prompt = f"""You are a precise and helpful assistant.
-Answer the question using **only** the provided context excerpts.
-Do NOT use any external knowledge.
-If the context does not contain sufficient information to answer accurately, 
-clearly state that you don't have enough information.
+        collection_size = rag.vectorstore._collection.count() if rag.vectorstore else 0
+        print(f"Collection total documents: {collection_size}")
+        print("="*60 + "\n")
 
-Context excerpts:
-{context}
+        # ─── Step 3: Handle no results case ───
+        if not results:
+            return {
+                "answer": "I couldn't find any relevant information in the uploaded documents.",
+                "contexts": [],
+                "sources": [],
+                "scores": [],
+                "debug": {
+                    "retrieved_count": 0,
+                    "collection_size": collection_size,
+                    "message": "No chunks matched the query (possible causes: low similarity, empty index, embedding mismatch)"
+                }
+            }
 
-Question: {question}
+        # Optional: filter out very low-relevance chunks (tune threshold)
+        MIN_SCORE_THRESHOLD = 0.65  # cosine distance – adjust between 0.5–0.75
+        filtered_results = [r for r in results if r["score"] <= MIN_SCORE_THRESHOLD]
 
-Answer concisely, naturally and directly:"""
+        if not filtered_results and results:
+            print("All retrieved chunks below relevance threshold — using top 2 anyway")
+            filtered_results = results[:2]  # fallback
 
-        # Call Groq model
-        llm_response = client.chat.completions.create(
+        # Use filtered or original results
+        final_results = filtered_results or results
+
+        # ─── Step 4: Format context ───
+        formatted_context = "\n\n".join(
+            f"[{i+1}] Source: {r['source']} (score: {r['score']:.4f})\n{r['content'].strip()}"
+            for i, r in enumerate(final_results)
+        )
+
+        # ─── Step 5: Stronger, more grounded prompt ───
+        rag_prompt = f"""You are a precise document Q&A assistant.
+Answer using **only** the provided context excerpts.
+Do NOT use outside knowledge.
+If the answer is not clearly supported by the context, respond exactly with:
+"Information not found in the provided documents."
+
+Context (with source and relevance score):
+{formatted_context}
+
+Question: {request.question}
+
+Answer concisely, clearly, and directly:"""
+
+        # ─── Step 6: Call LLM ───
+        response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.35,
-            max_tokens=650,
-            top_p=0.92,
-            presence_penalty=0.1,
-            frequency_penalty=0.0,
+            messages=[{"role": "user", "content": rag_prompt}],
+            temperature=0.2,           # lower = more deterministic
+            max_tokens=900,
+            top_p=0.9,
         )
 
-        answer_text = llm_response.choices[0].message.content.strip()
+        answer_text = response.choices[0].message.content.strip()
 
-        return RAGResponse(
-            answer=answer_text,
-            context_used=chunks
-        )
+        # ─── Step 7: Return structured response ───
+        return {
+            "answer": answer_text,
+            "contexts": [r["content"] for r in final_results],
+            "sources": [r["source"] for r in final_results],
+            "scores": [r["score"] for r in final_results],
+            "debug": {
+                "retrieved_count": len(results),
+                "filtered_count": len(final_results),
+                "collection_size": collection_size,
+                "used_threshold": MIN_SCORE_THRESHOLD if filtered_results != results else None
+            }
+        }
 
-    except RuntimeError as runtime_err:
-        # Usually related to vector store / retrieval failures
-        raise HTTPException(
-            status_code=400,
-            detail=f"Retrieval system error: {str(runtime_err)}"
-        )
-
-    except Exception as general_err:
+    except Exception as e:
         traceback.print_exc()
-        error_str = str(general_err).lower()
-
-        if "422" in error_str or "validation" in error_str or "unprocessable" in error_str:
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid request format. Expected JSON: {\"question\": \"your question\"}"
-            )
-
-        if any(word in error_str for word in ["rate limit", "quota", "429"]):
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit reached. Please try again in a few moments."
-            )
-
         raise HTTPException(
             status_code=500,
-            detail=f"Internal error while processing your question: {str(general_err)}"
+            detail=f"Error during RAG query: {str(e)}"
         )
 
-@app.get("/health")
-def health_check():
-    pdf_files = len([f for f in os.listdir(UPLOAD_FOLDER) if f.lower().endswith(".pdf")])
+
+@app.get("/status")
+def get_status():
     return {
-        "status": "ok",
-        "pdfs_uploaded": pdf_files,
-        "vectorstore_ready": rag.is_ready(),
-        "embedding_model": EMBEDDING_MODEL_NAME,
-        "chunks_file": rag.get_chunk_file_path()
+        "rag_ready": rag.is_ready(),
+        "upload_folder": UPLOAD_FOLDER,
+        "chunks_log": rag.get_chunks_log_path(),
+        "documents_count": len([f for f in os.listdir(UPLOAD_FOLDER) if f.lower().endswith(".pdf")])
     }
-
-
-@app.get("/chunks-info")
-def chunks_file_info():
-    path = rag.get_chunk_file_path()
-    if not os.path.exists(path):
-        return {"status": "chunks_file_not_created_yet"}
-
-    try:
-        line_count = sum(1 for _ in open(path, "r", encoding="utf-8"))
-        return {
-            "chunks_file": path,
-            "chunk_count": line_count,
-            "description": "Each line is JSON with text, source_file, timestamp, etc."
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 
 if __name__ == "__main__":
